@@ -6,6 +6,8 @@ set(LIBS
 	${conversion_libs}
 	MLIROptLib
 	MLIRPass
+	
+	TonicDialect
 )
 
 add_llvm_executable(tonic-opt tonic-opt.cpp)

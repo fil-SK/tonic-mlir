@@ -8,6 +8,7 @@ set(LIBS
 	MLIRPass
 	
 	TonicDialect
+	TonicToLinalg
 )
 
 add_llvm_executable(tonic-opt tonic-opt.cpp)

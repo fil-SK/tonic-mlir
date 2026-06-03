@@ -4,6 +4,7 @@
 
 #include "Dialect/Tonic/TonicDialect.h"
 #include "Dialect/Tonic/TonicOps.h"
+#include "Dialect/Tonic/Passes.h"
 
 int main(int argc, char **argv){
     mlir::DialectRegistry registry;
@@ -12,6 +13,7 @@ int main(int argc, char **argv){
 
     // Tonic dialect and passes are registered here, as we add them
     registry.insert<mlir::tonic::TonicDialect>();
+    mlir::tonic::registerTonicPasses();
 
     return mlir::asMainReturnCode(
         mlir::MlirOptMain(argc, argv, "TONIC Pass Driver\n", registry)

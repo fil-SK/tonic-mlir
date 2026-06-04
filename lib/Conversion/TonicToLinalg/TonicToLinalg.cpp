@@ -58,7 +58,9 @@ namespace mlir::tonic {
                 rewriter.setInsertionPointToStart(body);
                 Value inElem = body->getArgument(0);
                 Value zero = rewriter.create<arith::ConstantOp>(loc, rewriter.getF32FloatAttr(0.0f));
-                Value result = rewriter.create<arith::MaximumFOp>(loc, inElem, zero);
+
+                Value cond = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::OGT, inElem, zero);
+                Value result = rewriter.create<arith::SelectOp>(loc, cond, inElem, zero);
                 rewriter.create<linalg::YieldOp>(loc, result);
 
                 // Delete original tonic.relu op from IR and return success

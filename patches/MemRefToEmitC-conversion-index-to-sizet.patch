@@ -1,0 +1,16 @@
+diff --git a/mlir/lib/Conversion/MemRefToEmitC/MemRefToEmitC.cpp b/mlir/lib/Conversion/MemRefToEmitC/MemRefToEmitC.cpp
+index db244d1d1cac..02ba4737ba88 100644
+--- a/mlir/lib/Conversion/MemRefToEmitC/MemRefToEmitC.cpp
++++ b/mlir/lib/Conversion/MemRefToEmitC/MemRefToEmitC.cpp
+@@ -206,6 +206,11 @@ void mlir::populateMemRefToEmitCTypeConversion(TypeConverter &typeConverter) {
+                                      convertedElementType);
+       });
+ 
++  // My contribution - add conversion for index -> emitc.size_t
++  typeConverter.addConversion([](IndexType type) -> Type {
++    return emitc::SizeTType::get(type.getContext());
++  });
++
+   auto materializeAsUnrealizedCast = [](OpBuilder &builder, Type resultType,
+                                         ValueRange inputs,
+                                         Location loc) -> Value {

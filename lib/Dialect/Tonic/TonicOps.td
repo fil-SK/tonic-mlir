@@ -31,4 +31,23 @@ def Tonic_ReluOp : Tonic_Op<"relu"> {
     let assemblyFormat = "$input `,` $output attr-dict `:` type($input) `,` type($output)";
 }
 
+
+def Tonic_FlattenOp : Tonic_Op<"flatten"> {
+    let summary = "Flatten multi-dimensional memref into 1D memref by copying elements";
+    let description = [{
+        Applies the flattening by copying all elements into a 1D output memref, using row-major linearization.
+
+        Constraints:
+        - ONNX axis parameter is not supported. The op flattens all dimensions.
+        - This is a copy operation and not a zero-cost reshape.
+    }];
+
+    let arguments = (ins
+        Arg<AnyStaticShapeMemRef, "", [MemRead]>:$input,
+        Arg<AnyStaticShapeMemRef, "", [MemWrite]>:$output
+    );
+
+    let assemblyFormat = "$input `,` $output attr-dict `:` type($input) `,` type($output)";
+}
+
 #endif // LIB_DIALECT_TONIC_TONICOPS_TD_

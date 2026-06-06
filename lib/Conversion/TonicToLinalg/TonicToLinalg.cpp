@@ -6,6 +6,7 @@
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/IR/AffineExpr.h"
 
 #include "Dialect/Tonic/TonicDialect.h"
 #include "Dialect/Tonic/TonicOps.h"

@@ -71,6 +71,72 @@ namespace mlir::tonic {
         };
 
 
+        // Conversion rule for FlattenOp
+        struct FlattenOpLowering : public OpConversionPattern<FlattenOp> {
+            using OpConversionPattern::OpConversionPattern;
+
+            LogicalResult matchAndRewrite(FlattenOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
+
+                auto loc = op.getLoc();
+                auto inputType = cast<MemRefType>(adaptor.getInput().getType());
+                int64_t rank = inputType.getRank();
+                auto shape = inputType.getShape();
+
+                // Compute the row-major stride
+                SmallVector<int64_t> strides(rank);
+                strides[rank - 1] = 1;
+                for(int i = rank - 2; i >= 0; i--) {
+                    strides[i] = strides[i + 1] * shape[i + 1];
+                }
+
+
+                // Build the output linearization map
+                MLIRContext *ctx = rewriter.getContext();
+                AffineExpr linearExpr = getAffineConstantExpr(0, ctx);
+
+                for(int i = 0; i < rank; i++) {
+                    linearExpr = linearExpr + getAffineDimExpr(i, ctx) * strides[i];
+                }
+
+                auto outputMap = AffineMap::get(rank, 0, linearExpr, ctx);
+                auto identityMap = AffineMap::getMultiDimIdentityMap(rank, ctx);
+
+
+                // Again, for each operand, which indices map to which loop variables 
+                SmallVector<AffineMap> maps = {identityMap, outputMap};
+                SmallVector<utils::IteratorType> iteratorTypes(rank, utils::IteratorType::parallel);
+
+                
+                // Create linalg.generic op
+                auto genericOp = rewriter.create<linalg::GenericOp>(
+                    loc,
+                    TypeRange{},
+                    ValueRange{adaptor.getInput()},
+                    ValueRange{adaptor.getOutput()},
+                    maps,
+                    iteratorTypes
+                );
+
+
+                // Block where the code for each iteration runs
+                Block *body = rewriter.createBlock(
+                    &genericOp.getRegion(),
+                    {},
+                    {inputType.getElementType(), inputType.getElementType()},
+                    {loc, loc}
+                );
+
+
+                // Here, just copy the element from the input into the linearized position on the output
+                rewriter.setInsertionPointToStart(body);
+                rewriter.create<linalg::YieldOp>(loc, body->getArgument(0));
+
+                rewriter.eraseOp(op);
+                return success();
+            }
+        };
+
+
         struct TonicToLinalgPass : public impl::TonicToLinalgBase<TonicToLinalgPass> {
 
             void runOnOperation() override {
@@ -83,6 +149,7 @@ namespace mlir::tonic {
 
                 RewritePatternSet patterns(ctx);
                 patterns.add<ReluOpLowering>(ctx);
+                patterns.add<FlattenOpLowering>(ctx);
 
                 // partial - ops outside illegal set are left untouched
                 // If any tonic operation is present after ALL patterns run then the pass fails

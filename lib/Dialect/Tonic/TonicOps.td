@@ -50,4 +50,29 @@ def Tonic_FlattenOp : Tonic_Op<"flatten"> {
     let assemblyFormat = "$input `,` $output attr-dict `:` type($input) `,` type($output)";
 }
 
+
+def Tonic_GemmOp : Tonic_Op<"gemm"> {
+    let summary = "Performs general matrix multiplication with added bias: Y = A * B + bias";
+    let description = [{
+        General matrix multiplication, with set constraints, to represent a simplified ONNX Gemm operation.
+        Calculates Y = A * B + bias where:
+        - A is first input, of shape [M x K]
+        - B is second input, of shape [K x N]
+        - bias is an array of scalar values, of shape [N], broadcast over M rows (since output is [M x N])
+        - Y is output, of shape [M x N]
+
+        Constraints:
+        - Parameters locked: alpha = 1, beta = 1, transA = 0, transB = 0
+    }];
+
+    let arguments = (ins
+        Arg<AnyStaticShapeMemRef, "", [MemRead]>:$a,
+        Arg<AnyStaticShapeMemRef, "", [MemRead]>:$b,
+        Arg<AnyStaticShapeMemRef, "", [MemRead]>:$bias,
+        Arg<AnyStaticShapeMemRef, "", [MemWrite]>:$output
+    );
+
+    let assemblyFormat = "$a `,` $b `,` $bias `,` $output attr-dict `:` type($a) `,` type($b) `,` type($bias) `,` type($output)";
+}
+
 #endif // LIB_DIALECT_TONIC_TONICOPS_TD_

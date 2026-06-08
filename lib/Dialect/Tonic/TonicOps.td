@@ -75,4 +75,26 @@ def Tonic_GemmOp : Tonic_Op<"gemm"> {
     let assemblyFormat = "$a `,` $b `,` $bias `,` $output attr-dict `:` type($a) `,` type($b) `,` type($bias) `,` type($output)";
 }
 
+
+def Tonic_SoftmaxOp : Tonic_Op<"softmax"> {
+    let summary = "Performs the Softmax activation function";
+    let description = [{
+        Calculates softmax activation function for a 2D input, over the last dimension of the input.
+        Instead of using the naive approach (straigth applying the formula), the op uses numerically-stable approach with subtracting the maximum value of each row, before calculating the exponent. This prevents the floating point overflow.
+
+        Constraints:
+        - Just applied on the 2D input
+        - Calculates softmax over the last dimension only (always axis=1)
+        - Input and output must have IDENTICAL static 2D shapes
+
+    }];
+
+    let arguments = (ins
+        Arg<AnyStaticShapeMemRef, "", [MemRead]>:$input,
+        Arg<AnyStaticShapeMemRef, "", [MemWrite]>:$output
+    );
+
+    let assemblyFormat = "$input `,` $output attr-dict `:` type($input) `,` type($output)";
+}
+
 #endif // LIB_DIALECT_TONIC_TONICOPS_TD_

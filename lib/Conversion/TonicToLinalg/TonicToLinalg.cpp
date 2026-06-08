@@ -137,6 +137,84 @@ namespace mlir::tonic {
         };
 
 
+        // Conversion rule for GemmOp
+        struct GemmOpLowering : public OpConversionPattern<GemmOp> {
+            using OpConversionPattern::OpConversionPattern;
+
+            LogicalResult matchAndRewrite(GemmOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
+
+                auto loc = op.getLoc();
+                Value inputA = adaptor.getA();      // Targets the $a from the TableGen definition
+                Value inputB = adaptor.getB();
+                Value bias = adaptor.getBias();
+                Value output = adaptor.getOutput();
+
+
+                // First, fill the output with zeros
+                // Create ConstantOp representing value 0 and then fill the output variable (basically initialize it)
+                Value zero = rewriter.create<arith::ConstantOp>(loc, rewriter.getF32FloatAttr(0.0f));
+                rewriter.create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{output});
+
+
+                // Perform the matrix multiplication
+                rewriter.create<linalg::MatmulOp>(
+                    loc,
+                    TypeRange{},
+                    ValueRange{inputA, inputB},
+                    ValueRange{output}
+                );
+
+
+                // Build maps for bias op (through genericop) to use
+                MLIRContext *ctx = rewriter.getContext();
+                AffineExpr dim1 = getAffineDimExpr(1, ctx);
+                auto biasMap = AffineMap::get(2, 0, dim1, ctx);
+                auto outputMap = AffineMap::getMultiDimIdentityMap(2, ctx);
+
+
+                SmallVector<AffineMap> maps = {biasMap, outputMap};
+                SmallVector<utils::IteratorType> iterTypes = {
+                    utils::IteratorType::parallel,
+                    utils::IteratorType::parallel
+                };
+
+
+                // Add the bias parameter onto the calculated matmul
+                auto biasOp = rewriter.create<linalg::GenericOp>(
+                    loc,
+                    TypeRange{},
+                    ValueRange{bias},
+                    ValueRange{output},
+                    maps,
+                    iterTypes
+                );
+
+
+                // Create a body block
+                auto outputType = cast<MemRefType>(output.getType());
+                auto elemType = outputType.getElementType();
+                Block *body = rewriter.createBlock(
+                    &biasOp.getRegion(),
+                    {},
+                    {elemType, elemType},
+                    {loc, loc}
+                );
+
+
+                // Move cursor into created block and add ADDFOp and YieldOp into the block
+                rewriter.setInsertionPointToStart(body);
+                Value biasElement = body->getArgument(0);
+                Value outputElement = body->getArgument(1);
+                Value sum = rewriter.create<arith::AddFOp>(loc, outputElement, biasElement);
+                rewriter.create<linalg::YieldOp>(loc, sum);
+
+
+                rewriter.eraseOp(op);
+                return success();
+            }
+        };
+
+
         struct TonicToLinalgPass : public impl::TonicToLinalgBase<TonicToLinalgPass> {
 
             void runOnOperation() override {
@@ -150,6 +228,7 @@ namespace mlir::tonic {
                 RewritePatternSet patterns(ctx);
                 patterns.add<ReluOpLowering>(ctx);
                 patterns.add<FlattenOpLowering>(ctx);
+                patterns.add<GemmOpLowering>(ctx);
 
                 // partial - ops outside illegal set are left untouched
                 // If any tonic operation is present after ALL patterns run then the pass fails

@@ -241,11 +241,16 @@ namespace mlir::tonic {
                 auto inputMap = AffineMap::getMultiDimIdentityMap(2, ctx);
                 auto rowMap = AffineMap::get(2, 0, dim0, ctx);
 
-                SmallVector<AffineMap> mapsForMax = {inputMap, rowMap};             // This mapping used for max(...) reduction
-                SmallVector<AffineMap> mapsForSum = {inputMap, rowMap, rowMap};     // This mapping used for sum of exp(x - max)
+                SmallVector<AffineMap> mapsForMax = {inputMap, rowMap};                           // This mapping is used for max(...) reduction
+                SmallVector<AffineMap> mapsForSum = {inputMap, rowMap, rowMap};                   // This mapping is used for sum of exp(x - max)
+                SmallVector<AffineMap> mapsForSoftmax = {inputMap, rowMap, rowMap, inputMap};     // This mapping is used for the final calculation of the Softmax operation
                 SmallVector<utils::IteratorType> iterTypes = {
                     utils::IteratorType::parallel,
                     utils::IteratorType::reduction
+                };
+                SmallVector<utils::IteratorType> softmaxOutputIterTypes = {
+                    utils::IteratorType::parallel,
+                    utils::IteratorType::parallel
                 };
 
 
@@ -279,9 +284,9 @@ namespace mlir::tonic {
                 // Move cursor into created block
                 rewriter.setInsertionPointToStart(maxOpBody);
 
-                Value inElement = maxOpBody->getArgument(0);
+                Value inputElement = maxOpBody->getArgument(0);
                 Value currentMax = maxOpBody->getArgument(1);
-                Value newMax = rewriter.create<arith::MaximumFOp>(loc, inElement, currentMax);
+                Value newMax = rewriter.create<arith::MaximumFOp>(loc, inputElement, currentMax);
 
                 rewriter.create<linalg::YieldOp>(loc, newMax);
                 // ---------- STEP 1: Find the maximum value of each row END ----------
@@ -312,22 +317,63 @@ namespace mlir::tonic {
                     {loc, loc, loc}                    
                 );
 
-                // Move cursor intop created block
+                // Move cursor into created block
                 rewriter.setInsertionPointToStart(sumOpBody);
 
-                Value inElement = sumOpBody->getArgument(0);
-                Value maxElement = sumOpBody->getArgument(1);
+                Value sumInputElement = sumOpBody->getArgument(0);      // Input element to be used in sum operation
+                Value sumMaxElement = sumOpBody->getArgument(1);        // Max element to be used in the sum operation substraction
                 Value currentSum = sumOpBody->getArgument(2);
 
-                Value calculatedSubstraction = rewriter.create<arith::SubFOp>(loc, inElement, maxElement);
+                Value calculatedSubstraction = rewriter.create<arith::SubFOp>(loc, sumInputElement, sumMaxElement);
                 Value calculatedExponent = rewriter.create<math::ExpOp>(loc, calculatedSubstraction);
                 Value newSumValue = rewriter.create<arith::AddFOp>(loc, currentSum, calculatedExponent);
 
                 rewriter.create<linalg::YieldOp>(loc, newSumValue);
-
                 // ---------- STEP 2: Calculate the sum of exp(x - max) END ----------
+
+                // ---------- STEP 3: Calculate the remaining of Softmax START ----------
+
+                // Write the op for the final output
+                auto softmaxOutputOp = rewriter.create<linalg::GenericOp>(
+                    loc,
+                    TypeRange{},
+                    ValueRange{input, maxBuf, sumBuf},
+                    ValueRange{output},
+                    mapsForSoftmax,
+                    softmaxOutputIterTypes
+                );
+
+                // Create body block
+                Block *softmaxOutputBody = rewriter.createBlock(
+                    &softmaxOutputOp.getRegion(),
+                    {},
+                    {elementType, elementType, elementType, elementType},
+                    {loc, loc, loc, loc}
+                );
+
+                // Move cursor into created block
+                rewriter.setInsertionPointToStart(softmaxOutputBody);
+
+                // All are prefixed 's' here - because it's for the final step of softmax calculation
+                Value sInputElement = softmaxOutputBody->getArgument(0);
+                Value sMaxElement = softmaxOutputBody->getArgument(1);
+                Value sSumElement = softmaxOutputBody->getArgument(2);
+
+                Value sCalculatedSubstraction = rewriter.create<arith::SubFOp>(loc, sInputElement, sMaxElement);
+                Value sCalculatedExponent = rewriter.create<math::ExpOp>(loc, sCalculatedSubstraction);
+                Value softmaxResult = rewriter.create<arith::DivFOp>(loc, sCalculatedExponent, sSumElement);
+
+                rewriter.create<linalg::YieldOp>(loc, softmaxResult);
+                // ---------- STEP 3: Calculate the remaining of Softmax END ----------
+
+                // Op cleanup
+                rewriter.create<memref::DeallocOp>(loc, sumBuf);
+                rewriter.create<memref::DeallocOp>(loc, maxBuf);
+
+                rewriter.eraseOp(op);
+                return success();
             }
-        }
+        };
 
 
         struct TonicToLinalgPass : public impl::TonicToLinalgBase<TonicToLinalgPass> {
@@ -344,6 +390,7 @@ namespace mlir::tonic {
                 patterns.add<ReluOpLowering>(ctx);
                 patterns.add<FlattenOpLowering>(ctx);
                 patterns.add<GemmOpLowering>(ctx);
+                patterns.add<SoftmaxOpLowering>(ctx);
 
                 // partial - ops outside illegal set are left untouched
                 // If any tonic operation is present after ALL patterns run then the pass fails

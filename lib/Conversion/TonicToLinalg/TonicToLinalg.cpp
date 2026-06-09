@@ -241,7 +241,8 @@ namespace mlir::tonic {
                 auto inputMap = AffineMap::getMultiDimIdentityMap(2, ctx);
                 auto rowMap = AffineMap::get(2, 0, dim0, ctx);
 
-                SmallVector<AffineMap> maps = {inputMap, rowMap};
+                SmallVector<AffineMap> mapsForMax = {inputMap, rowMap};             // This mapping used for max(...) reduction
+                SmallVector<AffineMap> mapsForSum = {inputMap, rowMap, rowMap};     // This mapping used for sum of exp(x - max)
                 SmallVector<utils::IteratorType> iterTypes = {
                     utils::IteratorType::parallel,
                     utils::IteratorType::reduction
@@ -253,7 +254,7 @@ namespace mlir::tonic {
                 auto negInfFloatAttr = rewriter.getF32FloatAttr(negInf);
 
                 // First, fill the buffer (basically initialize it) with negative infinity values
-                Value maxBuf = rewriter.create<memref::AllocOp>(loc, helperBufferType);     // Allocate the buffer
+                Value maxBuf = rewriter.create<memref::AllocOp>(loc, helperBufferType);     // Allocate the buffer to hold row max
                 Value negativeInfinity = rewriter.create<arith::ConstantOp>(loc, negInfFloatAttr);
                 rewriter.create<linalg::FillOp>(loc, ValueRange{negativeInfinity}, ValueRange{maxBuf});
 
@@ -263,7 +264,7 @@ namespace mlir::tonic {
                     TypeRange{},
                     ValueRange{input},
                     ValueRange{maxBuf},
-                    maps,
+                    mapsForMax,
                     iterTypes
                 );
 
@@ -284,6 +285,47 @@ namespace mlir::tonic {
 
                 rewriter.create<linalg::YieldOp>(loc, newMax);
                 // ---------- STEP 1: Find the maximum value of each row END ----------
+
+                // ---------- STEP 2: Calculate the sum of exp(x - max) START ----------
+                auto zeroFloatAttr = rewriter.getF32FloatAttr(0.0f);
+
+                // Fill the buffer with 0 (starting state for sum)
+                Value sumBuf = rewriter.create<memref::AllocOp>(loc, helperBufferType);     // Allocate the buffer to hold sum value
+                Value zero = rewriter.create<arith::ConstantOp>(loc, zeroFloatAttr);
+                rewriter.create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{sumBuf});
+
+                // Write the reduction
+                auto sumOp = rewriter.create<linalg::GenericOp>(
+                    loc,
+                    TypeRange{},
+                    ValueRange{input, maxBuf},
+                    ValueRange{sumBuf},
+                    mapsForSum,
+                    iterTypes
+                );
+
+                // Create body block
+                Block *sumOpBody = rewriter.createBlock(
+                    &sumOp.getRegion(),
+                    {},
+                    {elementType, elementType, elementType},
+                    {loc, loc, loc}                    
+                );
+
+                // Move cursor intop created block
+                rewriter.setInsertionPointToStart(sumOpBody);
+
+                Value inElement = sumOpBody->getArgument(0);
+                Value maxElement = sumOpBody->getArgument(1);
+                Value currentSum = sumOpBody->getArgument(2);
+
+                Value calculatedSubstraction = rewriter.create<arith::SubFOp>(loc, inElement, maxElement);
+                Value calculatedExponent = rewriter.create<math::ExpOp>(loc, calculatedSubstraction);
+                Value newSumValue = rewriter.create<arith::AddFOp>(loc, currentSum, calculatedExponent);
+
+                rewriter.create<linalg::YieldOp>(loc, newSumValue);
+
+                // ---------- STEP 2: Calculate the sum of exp(x - max) END ----------
             }
         }
 

@@ -286,7 +286,9 @@ namespace mlir::tonic {
 
                 Value inputElement = maxOpBody->getArgument(0);
                 Value currentMax = maxOpBody->getArgument(1);
-                Value newMax = rewriter.create<arith::MaximumFOp>(loc, inputElement, currentMax);
+                
+                Value condition = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::OGT, inputElement, currentMax);
+                Value newMax = rewriter.create<arith::SelectOp>(loc, condition, inputElement, currentMax);
 
                 rewriter.create<linalg::YieldOp>(loc, newMax);
                 rewriter.setInsertionPointAfter(maxOp);         // Move cursor back to the outer BLOCK

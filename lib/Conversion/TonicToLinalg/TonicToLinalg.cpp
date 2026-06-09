@@ -4,6 +4,8 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 
+#include "mlir/Dialect/Math/IR/Math.h"
+
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/IR/AffineExpr.h"
@@ -11,6 +13,7 @@
 #include "Dialect/Tonic/TonicDialect.h"
 #include "Dialect/Tonic/TonicOps.h"
 
+#include <limits>                                   // To use -infinity
 
 namespace mlir::tonic {
 
@@ -215,6 +218,76 @@ namespace mlir::tonic {
         };
 
 
+        // Conversion rule for SoftmaxOp
+        struct SoftmaxOpLowering : public OpConversionPattern<SoftmaxOp> {
+            using OpConversionPattern::OpConversionPattern;
+
+            LogicalResult matchAndRewrite(SoftmaxOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
+
+                auto loc = op.getLoc();
+                Value input = adaptor.getInput();
+                Value output = adaptor.getOutput();
+
+                // Extract shape and prepare helper buffer type
+                auto inputType = cast<MemRefType>(input.getType());
+                auto elementType = inputType.getElementType();
+                auto inputShape = inputType.getShape();
+                int64_t numOfRows = inputShape[0];
+                auto helperBufferType = MemRefType::get({numOfRows}, elementType);
+
+                // Prepare input and row map
+                MLIRContext *ctx = rewriter.getContext();
+                AffineExpr dim0 = getAffineDimExpr(0, ctx);
+                auto inputMap = AffineMap::getMultiDimIdentityMap(2, ctx);
+                auto rowMap = AffineMap::get(2, 0, dim0, ctx);
+
+                SmallVector<AffineMap> maps = {inputMap, rowMap};
+                SmallVector<utils::IteratorType> iterTypes = {
+                    utils::IteratorType::parallel,
+                    utils::IteratorType::reduction
+                };
+
+
+                // ---------- STEP 1: Find the maximum value of each row START ----------
+                auto negInf = -std::numeric_limits<float>::infinity();
+                auto negInfFloatAttr = rewriter.getF32FloatAttr(negInf);
+
+                // First, fill the buffer (basically initialize it) with negative infinity values
+                Value maxBuf = rewriter.create<memref::AllocOp>(loc, helperBufferType);     // Allocate the buffer
+                Value negativeInfinity = rewriter.create<arith::ConstantOp>(loc, negInfFloatAttr);
+                rewriter.create<linalg::FillOp>(loc, ValueRange{negativeInfinity}, ValueRange{maxBuf});
+
+                // Write the reduction, which is max(...), as a GenericOp
+                auto maxOp = rewriter.create<linalg::GenericOp>(
+                    loc,
+                    TypeRange{},
+                    ValueRange{input},
+                    ValueRange{maxBuf},
+                    maps,
+                    iterTypes
+                );
+
+                // Create body block
+                Block *maxOpBody = rewriter.createBlock(
+                    &maxOp.getRegion(),
+                    {},
+                    {elementType, elementType},
+                    {loc, loc}
+                );
+
+                // Move cursor into created block
+                rewriter.setInsertionPointToStart(maxOpBody);
+
+                Value inElement = maxOpBody->getArgument(0);
+                Value currentMax = maxOpBody->getArgument(1);
+                Value newMax = rewriter.create<arith::MaximumFOp>(loc, inElement, currentMax);
+
+                rewriter.create<linalg::YieldOp>(loc, newMax);
+                // ---------- STEP 1: Find the maximum value of each row END ----------
+            }
+        }
+
+
         struct TonicToLinalgPass : public impl::TonicToLinalgBase<TonicToLinalgPass> {
 
             void runOnOperation() override {
@@ -222,7 +295,7 @@ namespace mlir::tonic {
                 ConversionTarget target(*ctx);
 
                 // Output dialects are legal and all Tonic ops must be converted (are illegal)
-                target.addLegalDialect<linalg::LinalgDialect, arith::ArithDialect, memref::MemRefDialect>();
+                target.addLegalDialect<linalg::LinalgDialect, arith::ArithDialect, memref::MemRefDialect, math::MathDialect>();
                 target.addIllegalDialect<TonicDialect>();
 
                 RewritePatternSet patterns(ctx);

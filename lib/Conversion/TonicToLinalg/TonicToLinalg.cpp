@@ -259,7 +259,7 @@ namespace mlir::tonic {
                 auto negInfFloatAttr = rewriter.getF32FloatAttr(negInf);
 
                 // First, fill the buffer (basically initialize it) with negative infinity values
-                Value maxBuf = rewriter.create<memref::AllocOp>(loc, helperBufferType);     // Allocate the buffer to hold row max
+                Value maxBuf = rewriter.create<memref::AllocaOp>(loc, helperBufferType);     // Allocate the buffer to hold row max
                 Value negativeInfinity = rewriter.create<arith::ConstantOp>(loc, negInfFloatAttr);
                 rewriter.create<linalg::FillOp>(loc, ValueRange{negativeInfinity}, ValueRange{maxBuf});
 
@@ -298,7 +298,7 @@ namespace mlir::tonic {
                 auto zeroFloatAttr = rewriter.getF32FloatAttr(0.0f);
 
                 // Fill the buffer with 0 (starting state for sum)
-                Value sumBuf = rewriter.create<memref::AllocOp>(loc, helperBufferType);     // Allocate the buffer to hold sum value
+                Value sumBuf = rewriter.create<memref::AllocaOp>(loc, helperBufferType);     // Allocate the buffer to hold sum value
                 Value zero = rewriter.create<arith::ConstantOp>(loc, zeroFloatAttr);
                 rewriter.create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{sumBuf});
 
@@ -372,9 +372,6 @@ namespace mlir::tonic {
                 // ---------- STEP 3: Calculate the remaining of Softmax END ----------
 
                 // Op cleanup
-                rewriter.create<memref::DeallocOp>(loc, sumBuf);
-                rewriter.create<memref::DeallocOp>(loc, maxBuf);
-
                 rewriter.eraseOp(op);
                 return success();
             }

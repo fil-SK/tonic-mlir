@@ -1,2 +1,13 @@
+# Project-related
 cmake-build/
 externals/llvm-project/build/
+
+
+# Python virtual environment
+.venv/
+
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

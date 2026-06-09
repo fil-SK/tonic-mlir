@@ -289,6 +289,7 @@ namespace mlir::tonic {
                 Value newMax = rewriter.create<arith::MaximumFOp>(loc, inputElement, currentMax);
 
                 rewriter.create<linalg::YieldOp>(loc, newMax);
+                rewriter.setInsertionPointAfter(maxOp);         // Move cursor back to the outer BLOCK
                 // ---------- STEP 1: Find the maximum value of each row END ----------
 
                 // ---------- STEP 2: Calculate the sum of exp(x - max) START ----------
@@ -329,6 +330,7 @@ namespace mlir::tonic {
                 Value newSumValue = rewriter.create<arith::AddFOp>(loc, currentSum, calculatedExponent);
 
                 rewriter.create<linalg::YieldOp>(loc, newSumValue);
+                rewriter.setInsertionPointAfter(sumOp);         // Move cursor back to the outer BLOCK
                 // ---------- STEP 2: Calculate the sum of exp(x - max) END ----------
 
                 // ---------- STEP 3: Calculate the remaining of Softmax START ----------
@@ -364,6 +366,7 @@ namespace mlir::tonic {
                 Value softmaxResult = rewriter.create<arith::DivFOp>(loc, sCalculatedExponent, sSumElement);
 
                 rewriter.create<linalg::YieldOp>(loc, softmaxResult);
+                rewriter.setInsertionPointAfter(softmaxOutputOp);           // Move cursor back to the outer BLOCK
                 // ---------- STEP 3: Calculate the remaining of Softmax END ----------
 
                 // Op cleanup
